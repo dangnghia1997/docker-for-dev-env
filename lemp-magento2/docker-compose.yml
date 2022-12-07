@@ -1,0 +1,103 @@
+version: "3.6"
+services:
+  web:
+    image: nginx
+    ports:
+      - "80:80"
+      - "8080:8080"
+      - "443:443"
+    env_file:
+      - .env
+    environment:
+      - SERVER_NAME=${SERVER_NAME}
+    volumes:
+      - .:/app:cached
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./docker/nginx/conf.d/default.conf:/etc/nginx/conf.d/default.conf:cached
+    links:
+      - php-fpm
+    depends_on:
+      - php-fpm
+    networks:
+      app-local:
+        aliases:
+          - ${SERVER_NAME}
+
+  php-fpm:
+    image: php:7.3-fpm
+    env_file:
+      - .env
+    environment:
+        - PHP_IDE_CONFIG=serverName=${SERVER_NAME}
+    build:
+      context: .
+      dockerfile:
+        Dockerfile
+    volumes:
+      - .:/app:cached
+      - ./docker/php/php.ini:/usr/local/etc/php/php.ini:cached
+      - ./docker/php/conf.d/docker-php-ext-xdebug.ini:/usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini:cached
+      - ./docker/php/conf.d/zz-blackfire.ini:/usr/local/etc/php/conf.d/zz-blackfire.ini:cached
+      - ./docker/php/php-fpm.d/www.conf:/usr/local/etc/php-fpm.d/www.conf:cached
+    depends_on:
+      - db
+      - elasticsearch
+      - redis
+    links:
+      - db
+      - elasticsearch
+      - redis
+    networks:
+      - app-local
+
+  db:
+    #platform: linux/x86_64
+    image: mariadb:10.5.8 #mysql:5.7
+    ports:
+      - "3306:3306"
+    env_file:
+      - .env
+    volumes:
+      - ./docker/db/mysqld.cnf:/etc/mysql/mysql.conf.d/mysqld.cnf:cached
+      - ./docker/db/db_backup.sql:/docker-entrypoint-initdb.d/init.sql:cached
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+    networks:
+      - app-local
+
+  elasticsearch:
+    image: webhippie/elasticsearch:6.4-arm64v8
+    environment:
+      - http.host=0.0.0.0
+      - transport.host=127.0.0.1
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    networks:
+      - app-local
+
+  redis:
+    image: redis:6.0-alpine
+    networks:
+      - app-local
+
+  varnish:
+    image: varnish
+    environment:
+        - VARNISH_SIZE=1G
+        - VARNISH_LISTEN_PORT=80
+    volumes:
+        - ./docker/varnish/default.vcl:/etc/varnish/default.vcl
+    networks:
+        - app-local
+    depends_on:
+        - web
+
+networks:
+    app-local:
